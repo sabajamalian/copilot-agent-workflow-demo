@@ -193,7 +193,7 @@ async function validateTarget(input) {
     const { stdout } = await run('git', ['-c', 'core.fsmonitor=false', '-C', target, 'rev-parse', '--show-toplevel'], {
       env, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true,
     });
-    root = path.resolve(stdout.trim());
+    root = path.resolve(stdout.replace(/\r?\n$/, ''));
   } catch (error) {
     fail(`Target is not a Git worktree, or Git is unavailable: ${target} (${error.code ?? 'git failed'}).`);
   }
@@ -485,7 +485,7 @@ export async function install({ target = process.cwd(), source = CANONICAL_SOURC
     schemaVersion: 1,
     plugin: PLUGIN_NAME,
     version: incoming.version,
-    files: [...incoming.files].sort(([a], [b]) => a.localeCompare(b)).map(([relative, file]) => ({
+    files: [...incoming.files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([relative, file]) => ({
       path: relative, sha256: file.hash,
     })),
   };
@@ -598,7 +598,7 @@ export async function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (process.argv[1] && samePath(import.meta.url, pathToFileURL(path.resolve(process.argv[1])).href)) {
   try {
     process.exitCode = await main();
   } catch (error) {

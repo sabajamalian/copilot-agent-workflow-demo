@@ -32,8 +32,25 @@ async function removeFixture(root) {
     for (const name of await fs.readdir(root)) await removeFixture(path.join(root, name));
     await fs.rmdir(root);
   } else {
-    await fs.unlink(root);
+    try {
+      await fs.unlink(root);
+    } catch (error) {
+      if (process.platform !== 'win32' || stat.isSymbolicLink() || !['EPERM', 'EACCES'].includes(error.code)) throw error;
+      // Git object files can carry the Windows read-only attribute.
+      await fs.chmod(root, 0o600);
+      await fs.unlink(root);
+    }
   }
+}
+
+async function fixtureGit({ root, target }, args) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
+  return run('git', [
+    '--no-optional-locks', '-C', target,
+    '-c', `core.hooksPath=${path.join(root, 'no-hooks')}`,
+    '-c', 'user.name=Installer Test', '-c', 'user.email=installer@example.invalid',
+    '-c', 'commit.gpgsign=false', ...args,
+  ], { env, windowsHide: true });
 }
 
 async function tree(root) {
@@ -87,6 +104,14 @@ async function symlinkOrSkip(t, destination, link, type = 'file') {
     await fs.symlink(destination, link, type);
     return true;
   } catch (error) {
+    if (process.platform === 'win32' && type === 'dir' && ['EPERM', 'EACCES'].includes(error.code)) {
+      try {
+        await fs.symlink(destination, link, 'junction');
+        return true;
+      } catch (junctionError) {
+        if (!['EPERM', 'EACCES', 'ENOSYS'].includes(junctionError.code)) throw junctionError;
+      }
+    }
     if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) {
       t.skip(`Symlinks unavailable: ${error.code}`);
       return false;
@@ -156,6 +181,48 @@ test('uninstall without a manifest preserves unmanaged local copies', async (t) 
   assert.equal((await uninstall({ target })).action, 'absent');
   assert.deepEqual(await tree(target), before);
   assert.equal((await doctor({ target })).ok, false);
+});
+
+test('uses locale-independent manifest ordering and keeps repeated installs unchanged', async (t) => {
+  const options = await fixture(t);
+  for (const name of ['_helper', 'Zed', 'z-helper']) {
+    await put(options.source, `${sourceExtension}/helpers/${name}.mjs`, `export const name = '${name}';\n`);
+  }
+  await install(options);
+  const paths = (await manifest(options.target)).files.map((entry) => entry.path);
+  assert.deepEqual(paths, [...paths].sort());
+  const before = await tree(options.target);
+  assert.equal((await update(options)).action, 'unchanged');
+  assert.deepEqual(await tree(options.target), before);
+});
+
+test('preserves dirty tracked files, untracked files, and the Git index', async (t) => {
+  const options = await fixture(t);
+  await put(options.target, 'tracked.txt', 'committed\n');
+  await fixtureGit(options, ['add', '--', 'tracked.txt']);
+  await fixtureGit(options, ['commit', '--quiet', '-m', 'Fixture']);
+  await put(options.target, 'tracked.txt', 'user work\n');
+  await put(options.target, 'untracked.txt', 'untracked user work\n');
+  const beforeStatus = (await fixtureGit(options, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).stdout;
+  const beforeIndex = await fs.readFile(path.join(options.target, '.git', 'index'));
+  const beforeFiles = await tree(options.target);
+  await install(options);
+  const installedFiles = await tree(options.target);
+  assert.equal((await update(options)).action, 'unchanged');
+  assert.deepEqual(await tree(options.target), installedFiles);
+  await uninstall(options);
+  assert.deepEqual(await tree(options.target), beforeFiles);
+  assert.deepEqual(await fs.readFile(path.join(options.target, '.git', 'index')), beforeIndex);
+  assert.equal((await fixtureGit(options, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).stdout, beforeStatus);
+});
+
+test('accepts a Git root whose name ends in a space', { skip: process.platform === 'win32' }, async (t) => {
+  const options = await fixture(t);
+  const target = `${options.target} `;
+  await fs.rename(options.target, target);
+  assert.equal((await install({ ...options, target })).action, 'installed');
+  assert.equal((await doctor({ target })).ok, true);
+  assert.equal((await uninstall({ target })).action, 'uninstalled');
 });
 
 for (const mutation of ['modified', 'missing']) {
@@ -326,11 +393,9 @@ test('rejects invalid targets, nested directories, and source/destination overla
 
 test('supports linked Git worktrees without requiring a .git directory', async (t) => {
   const options = await fixture(t);
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
-  const hooksConfig = `core.hooksPath=${path.join(options.root, 'no-hooks')}`;
-  await run('git', ['-C', options.target, '-c', hooksConfig, '-c', 'user.name=Installer Test', '-c', 'user.email=installer@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '--quiet', '-m', 'Fixture'], { env });
+  await fixtureGit(options, ['commit', '--allow-empty', '--quiet', '-m', 'Fixture']);
   const target = path.join(options.root, 'linked worktree');
-  await run('git', ['-C', options.target, '-c', hooksConfig, 'worktree', 'add', '--quiet', '--detach', target], { env });
+  await fixtureGit(options, ['worktree', 'add', '--quiet', '--detach', target]);
   assert.equal((await fs.lstat(path.join(target, '.git'))).isFile(), true);
   assert.equal((await install({ ...options, target })).action, 'installed');
   assert.equal((await doctor({ target })).ok, true);
@@ -554,4 +619,14 @@ test('CLI help, argument validation, exit codes, and cwd-independent script loca
   await assert.rejects(run(process.execPath, [cli, 'doctor'], { cwd: target }), (error) => error.code === 1 && /No installation manifest/.test(error.stdout));
   const removed = await run(process.execPath, [cli, 'uninstall', '--target', target], { cwd: target });
   assert.match(removed.stdout, /absent/);
+});
+
+test('accepts Windows drive casing and forward-slash CLI paths', { skip: process.platform !== 'win32' }, async (t) => {
+  const options = await fixture(t);
+  const windowsAlias = (filename) => filename.replaceAll('\\', '/').replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
+  const target = windowsAlias(options.target);
+  assert.equal((await install({ ...options, target })).action, 'installed');
+  const result = await run(process.execPath, [windowsAlias(cli), 'doctor', '--target', target], { cwd: options.target });
+  assert.match(result.stdout, /PASS Installed layout and hashes/);
+  assert.equal((await uninstall({ target })).action, 'uninstalled');
 });

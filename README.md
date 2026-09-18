@@ -131,6 +131,9 @@ committed, pushed, merged, published, or deployed by the demo.
 
 Use this if marketplace installation is unavailable or you want to inspect and
 modify the extension locally. It uses only Node built-ins and Git.
+The target filesystem must support hard links for atomic publication. Locked
+files on Windows can require closing the process that holds them and following
+the installer's reported recovery-journal instructions.
 
 **First create/open the target desktop session, then install into its actual
 working directory.** Desktop worktree sessions are separate checkouts. Installing

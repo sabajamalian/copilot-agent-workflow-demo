@@ -53,8 +53,10 @@ PASS: live four-stage chain, three automatic transitions, independent behavior a
 ```
 
 Offline commands `npm run check`, `npm test`, and `npm run demo:test` passed on
-the authoring machine: 79 workflow/installer tests and two baseline example
-tests in the recorded run. The repository's **Checks** workflow records the
+the authoring machine. The final installer portability run discovered 83
+workflow/installer tests: 82 passed and the Windows-only CLI-path test was
+skipped on macOS. Both baseline example tests passed. The repository's
+**Checks** workflow records the
 cross-platform results for the published commit; consult that run for its
 authoritative status rather than treating a local run as CI evidence.
 
