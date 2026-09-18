@@ -1,0 +1,16 @@
+{
+  "name": "agent-workflow-demos",
+  "owner": { "name": "Saba Jamalian" },
+  "metadata": {
+    "description": "Inspectable examples of agent workflow engineering.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "agent-workflow-demo",
+      "description": "Explicit custom-agent chaining in the GitHub Copilot app.",
+      "version": "0.1.0",
+      "source": "./plugins/agent-workflow-demo"
+    }
+  ]
+}

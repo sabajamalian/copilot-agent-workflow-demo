@@ -1,0 +1,10 @@
+{
+  "name": "agent-workflow-demo",
+  "version": "0.1.0",
+  "description": "Experimental, explicit plan/implement/test/review chaining in one Copilot session.",
+  "author": { "name": "Saba Jamalian" },
+  "repository": "https://github.com/sabajamalian/copilot-agent-workflow-demo",
+  "license": "MIT",
+  "agents": "agents",
+  "extensions": ["extensions"]
+}

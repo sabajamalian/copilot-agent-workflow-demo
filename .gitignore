@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+.github/agent-workflow-demo.install.json
+.github/agents/workflow-*.agent.md
+.github/extensions/agent-workflow/
